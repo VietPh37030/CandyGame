@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Board, Candy, GameState, LevelConfig, Booster, BoosterType } from './types';
+import { Board, Candy, GameState, LevelConfig, Booster, BoosterType, FloatingText } from './types';
 import { 
   BOARD_SIZE, 
   ANIMATION_DELAY, 
@@ -25,6 +25,8 @@ const App: React.FC = () => {
   const [movesLeft, setMovesLeft] = useState(0);
   const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
   const [activeBooster, setActiveBooster] = useState<BoosterType | null>(null);
+  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
+  const [comboShake, setComboShake] = useState(false);
   
   // Use Refs for state that shouldn't trigger immediate re-renders inside timeouts
   const boardRef = useRef<Board>([]);
@@ -38,6 +40,27 @@ const App: React.FC = () => {
 
   const currentLevelConfig = LEVELS[currentLevelIndex];
 
+  // --- Helper: Visual Effects ---
+
+  const addFloatingText = (text: string, r: number, c: number, className: string = 'text-white', duration: number = 800) => {
+    const id = Date.now() + Math.random();
+    // Convert grid coordinates to percentage for positioning
+    const x = (c / BOARD_SIZE) * 100 + (50 / BOARD_SIZE);
+    const y = (r / BOARD_SIZE) * 100 + (50 / BOARD_SIZE);
+
+    setFloatingTexts(prev => [...prev, { id, text, x, y, className }]);
+
+    // Auto remove after animation
+    setTimeout(() => {
+        setFloatingTexts(prev => prev.filter(ft => ft.id !== id));
+    }, duration);
+  };
+
+  const triggerComboEffect = () => {
+    setComboShake(true);
+    setTimeout(() => setComboShake(false), 500);
+  };
+
   // --- Initialization ---
 
   const startLevel = useCallback((levelIndex: number) => {
@@ -49,6 +72,8 @@ const App: React.FC = () => {
     setGameState(GameState.IDLE);
     setSelectedPos(null);
     setActiveBooster(null);
+    setFloatingTexts([]);
+    setComboShake(false);
   }, []);
 
   useEffect(() => {
@@ -57,7 +82,7 @@ const App: React.FC = () => {
 
   // --- Game Loop / Logic ---
 
-  const processMatches = useCallback(async (currentBoard: Board, isPlayerMove: boolean) => {
+  const processMatches = useCallback(async (currentBoard: Board, isPlayerMove: boolean, comboMultiplier: number = 1) => {
     setGameState(GameState.PROCESSING);
 
     // 1. Check for matches
@@ -65,21 +90,54 @@ const App: React.FC = () => {
 
     if (hasMatches) {
       // 2. Animate Matches (Mark them)
-      playSound('match');
+      playSound('match', comboMultiplier);
       const matchedBoard = currentBoard.map(row =>
         row.map(candy => (candy && matchedIds.has(candy.id) ? { ...candy, isMatched: true } : candy))
       );
       setBoard(matchedBoard);
       
-      // Calculate Score
-      const points = matchedIds.size * 10 * (matchedIds.size > 3 ? 1.5 : 1);
-      setScore(prev => prev + Math.floor(points));
+      // Calculate Score with Combo Multiplier
+      const basePoints = matchedIds.size * 10 * (matchedIds.size > 3 ? 1.5 : 1);
+      const totalPoints = Math.floor(basePoints * comboMultiplier);
+      setScore(prev => prev + totalPoints);
+
+      // Find center of match for floating text
+      let centerR = 0, centerC = 0, count = 0;
+      currentBoard.forEach((row, r) => {
+          row.forEach((candy, c) => {
+              if (candy && matchedIds.has(candy.id)) {
+                  centerR += r;
+                  centerC += c;
+                  count++;
+              }
+          });
+      });
+
+      if (count > 0) {
+          const r = centerR / count;
+          const c = centerC / count;
+          
+          // Regular score text
+          addFloatingText(`+${totalPoints}`, r, c, 'text-white font-bold animate-float', 800);
+
+          // Combo Visuals
+          if (comboMultiplier > 1) {
+              triggerComboEffect();
+              addFloatingText(
+                  `Combo x${comboMultiplier}!`, 
+                  r - 0.5, 
+                  c, 
+                  'text-yellow-300 font-black text-2xl md:text-3xl z-20 animate-combo drop-shadow-md stroke-black', 
+                  1200
+              );
+          }
+      }
 
       // Wait for pop animation
       await new Promise(r => setTimeout(r, ANIMATION_DELAY));
 
       // 3. Remove and Drop
-      playSound('pop');
+      playSound('pop', comboMultiplier);
       const cleanBoard = removeMatches(matchedBoard, matchedIds);
       const filledBoard = dropAndRefill(cleanBoard);
       
@@ -88,8 +146,8 @@ const App: React.FC = () => {
       // Wait for drop animation
       await new Promise(r => setTimeout(r, ANIMATION_DELAY));
 
-      // 4. Recursive check
-      processMatches(filledBoard, false);
+      // 4. Recursive check with incremented multiplier
+      processMatches(filledBoard, false, comboMultiplier + 1);
 
     } else {
       // No more matches
@@ -98,6 +156,7 @@ const App: React.FC = () => {
       if (!hasPossibleMoves(currentBoard)) {
           // Auto shuffle if no moves
           playSound('invalid'); // reuse sound for alert
+          addFloatingText("No Moves! Shuffling...", BOARD_SIZE/2, BOARD_SIZE/2, 'text-red-400 font-bold animate-float', 2000);
           const shuffled = generateBoard();
           setBoard(shuffled);
           // Don't recurse immediately, let user play
@@ -129,6 +188,7 @@ const App: React.FC = () => {
               const newBoard = generateBoard();
               setBoard(newBoard);
               playSound('swap');
+              addFloatingText("Shuffled!", 3.5, 3.5, 'text-blue-300 font-bold animate-float');
           } else {
               // Target effect (requires clicking candy)
               setActiveBooster(activeBooster === type ? null : type);
@@ -213,7 +273,7 @@ const App: React.FC = () => {
 
         if (hasMatches) {
           setMovesLeft(prev => prev - 1);
-          setTimeout(() => processMatches(newBoard, true), 200);
+          setTimeout(() => processMatches(newBoard, true, 1), 200); // Start chain with combo 1
         } else {
           // Invalid move: swap back
           playSound('invalid');
@@ -277,9 +337,9 @@ const App: React.FC = () => {
       </div>
 
       {/* Game Board Area */}
-      <div className="relative bg-slate-800 p-2 rounded-xl shadow-2xl border-4 border-slate-700">
+      <div className="relative bg-slate-800 p-2 rounded-xl shadow-2xl border-4 border-slate-700 transition-all duration-100">
         <div 
-          className="grid gap-1 bg-slate-900/50 p-1 rounded-lg"
+          className={`grid gap-1 bg-slate-900/50 p-1 rounded-lg relative transition-all duration-100 ${comboShake ? 'animate-shake ring-4 ring-yellow-400/50 shadow-[0_0_30px_rgba(250,204,21,0.3)]' : ''}`}
           style={{ 
             gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))`,
             width: 'min(90vw, 400px)',
@@ -296,6 +356,24 @@ const App: React.FC = () => {
               />
             ))
           )}
+
+          {/* Floating Combo Text Layer */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg z-20">
+             {floatingTexts.map(ft => (
+                 <div 
+                    key={ft.id}
+                    className={`absolute whitespace-nowrap ${ft.className}`}
+                    style={{ 
+                        left: `${ft.x}%`, 
+                        top: `${ft.y}%`,
+                        textShadow: '0px 2px 4px rgba(0,0,0,0.8)'
+                    }}
+                 >
+                     {ft.text}
+                 </div>
+             ))}
+          </div>
+
         </div>
         
         {/* Game Over / Win Overlays */}

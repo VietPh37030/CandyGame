@@ -34,3 +34,11 @@ export interface Booster {
   icon: React.ReactNode;
   label: string;
 }
+
+export interface FloatingText {
+  id: number;
+  text: string;
+  x: number; // Percentage
+  y: number; // Percentage
+  className: string;
+}

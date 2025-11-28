@@ -28,7 +28,7 @@ const playTone = (freq: number, type: OscillatorType, duration: number, volume: 
   osc.stop(audioCtx.currentTime + duration);
 };
 
-export const playSound = (effect: 'swap' | 'match' | 'invalid' | 'win' | 'pop') => {
+export const playSound = (effect: 'swap' | 'match' | 'invalid' | 'win' | 'pop', pitchMultiplier: number = 1) => {
   // Silent fallback if context fails
   try {
     switch (effect) {
@@ -39,11 +39,13 @@ export const playSound = (effect: 'swap' | 'match' | 'invalid' | 'win' | 'pop') 
         playTone(150, 'sawtooth', 0.2);
         break;
       case 'match':
-        playTone(400, 'sine', 0.1, 0.2);
-        setTimeout(() => playTone(600, 'sine', 0.1, 0.2), 100);
+        // Ascending pitch based on multiplier
+        const baseFreq = 400 + (pitchMultiplier - 1) * 100; 
+        playTone(baseFreq, 'sine', 0.1, 0.2);
+        setTimeout(() => playTone(baseFreq * 1.5, 'sine', 0.1, 0.2), 100);
         break;
       case 'pop':
-        playTone(200, 'square', 0.1, 0.05);
+        playTone(200 + (pitchMultiplier * 50), 'square', 0.1, 0.05);
         break;
       case 'win':
         playTone(400, 'sine', 0.2);
